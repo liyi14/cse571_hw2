@@ -15,7 +15,7 @@ def get_args():
     parser.add_argument('-m', '--map', type=str, default='envs/map2.txt',
                     help='The environment to plan on')    
     parser.add_argument('-p', '--planner', type=str, default='astar',
-                        help='Please specify a planner: (astar, rrt, rrtstar, nonholrrt)')
+                        help='Please specify a planner: (astar, rrt, rrtstar, nonholrrt, dynamic)')
     # parser.add_argument('-s', '--start', nargs='+', type=float, required=True)
     # parser.add_argument('-g', '--goal', nargs='+', type=float, required=True)
     parser.add_argument('-eps', '--epsilon', type=float, default=1.0, help='Epsilon for A*')
@@ -57,9 +57,7 @@ if __name__ == "__main__":
         start_pos = (0, 0, 0)
         goal_pos = [0, 0, 2.0]
         env = ArmEnvironment(urdf_file, start_pos, goal_pos, obstacles, vis_plan=args.visualize)
-    # if args.visualize:
-    #     env.visualize_c_space()
-        
+    
     if args.planner == "astar":
         from Astar import AstarPlanner
         # Instantiate the A* algorithm
@@ -70,43 +68,73 @@ if __name__ == "__main__":
         planner = RRTPlanner(env)
     if args.planner.lower() == 'rrtstar':
         from RRTStarPlanner import RRTStarPlanner
-        # Instantiate the RRT algorithm
+        # Instantiate the RRT Star algorithm
         planner = RRTStarPlanner(env)
     if args.planner.lower() == 'nonholrrt':
         from RRTPlannerNonholonomic import RRTPlannerNonholonomic
         # Instantiate the RRT algorithm
         planner = RRTPlannerNonholonomic(env)
+    if args.planner.lower() == 'dynamic':
+        from DynamicPathPlanner import DynamicPathPlanner
+        # Instantiate the D*/LPA* algorithm
+        planner = DynamicPathPlanner(env)
+        # IMPORTANT: This variable needs to be set to True only for dynamic path planning
+        env.change_env = True
+        # The below variable decides how often you want to replan. Change it if required
+        # env.change_env_step_threshold = 50
     
-    # Get the path from the planner
-    
-    start_time = time.time()
-    path = planner.Plan(env.start, env.goal)
-    end_time = time.time()
-    
-    print("Time cost: ", end_time-start_time)
-    
-    if args.scene == 'car':
-        # Visualize the final path.
-        tree = None
-        visited = None
-        if args.planner != 'astar':
-            tree = planner.tree
-        else:
-            visited = planner.visited
-        env.visualize_plan(path, tree, visited)
-        plt.show()
-    elif (args.scene == '2dof_robot_arm') or (args.scene == '3dof_robot_arm'):
-        if (args.planner == 'astar') and (args.scene == '2dof_robot_arm'):
-            planner.plot()
-        else:
-            if args.visualize:
-                tree = None
-                visited = None
+    if args.planner == 'dynamic':
+        # TODO: Extra credit implementation, Modify this IF required
+        goal_reached = False
+        max_steps = 100
+
+        for i in range(max_steps):
+            # Get the plan based on the start state and the goal state
+            path = planner.Plan(env.start_joint_state, env.goal_joint_state)
+            if path is not None:
+                # Use the planner plot if you have implemented the plot function in the dynamic path planner function
+                # planner.plot()
+                if env.follow_path(path):
+                    print("Goal Reached")
+                    exit()
+            # This function will move the obstacles slightly
+            env.randomize_obstables()
+
+            # Once the obstacles have changed the c_space needs to be calculated again
+            env.calculate_c_space()
+
+        print("Goal not reached")
+
+    else:
+        # Get the path from the planner
+        start_time = time.time()
+        path = planner.Plan(env.start, env.goal)
+        end_time = time.time()
+        
+        print("Time cost: ", end_time-start_time)
+        
+        if args.scene == 'car':
+            # Visualize the final path.
+            tree = None
+            visited = None
+            if args.planner != 'astar':
                 tree = planner.tree
-                print(path, tree, visited)
-                env.visualize_plan(path.T, tree, visited)
-                plt.show()
-        if path is not None:
-            env.follow_path(path)
-        else:
-            print("you have to implement Plan() to compute the cost!")
+            else:
+                visited = planner.visited
+            env.visualize_plan(path, tree, visited)
+            plt.show()
+        elif (args.scene == '2dof_robot_arm') or (args.scene == '3dof_robot_arm'):
+            if (args.planner == 'astar') and (args.scene == '2dof_robot_arm'):
+                planner.plot()
+            else:
+                if args.visualize:
+                    tree = None
+                    visited = None
+                    tree = planner.tree
+                    print(path, tree, visited)
+                    env.visualize_plan(path.T, tree, visited)
+                    plt.show()
+            if path is not None:
+                env.follow_path(path)
+            else:
+                print("No plan returned")
