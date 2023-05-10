@@ -64,7 +64,6 @@ class ArmEnvironment:
 
             @param config: a [2 x n] numpy array of states
         """
-        # TODO: YOUR IMPLEMENTATION HERE
         config = config.reshape((self.c_space_dim, -1))
         # print(config, self.c_space_limit)
         for x in config.T:
