@@ -67,15 +67,15 @@ if __name__ == "__main__":
     if args.planner.lower() == 'rrt':
         from RRTPlanner import RRTPlanner
         # Instantiate the RRT algorithm
-        planner = RRTPlanner(env)
+        planner = RRTPlanner(env, bias=args.bias, eta=args.eta)
     if args.planner.lower() == 'rrtstar':
         from RRTStarPlanner import RRTStarPlanner
         # Instantiate the RRT algorithm
-        planner = RRTStarPlanner(env)
+        planner = RRTStarPlanner(env, bias=args.bias, eta=args.eta)
     if args.planner.lower() == 'nonholrrt':
         from RRTPlannerNonholonomic import RRTPlannerNonholonomic
         # Instantiate the RRT algorithm
-        planner = RRTPlannerNonholonomic(env)
+        planner = RRTPlannerNonholonomic(env, bias=args.bias)
     
     # Get the path from the planner
     
