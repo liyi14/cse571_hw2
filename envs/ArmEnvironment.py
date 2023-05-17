@@ -19,7 +19,7 @@ class ArmEnvironment:
         self.joint_indices = [i[0] for i in self.joint_info]
         self.goal_tolerance = 0.05
         self.num_discretize = 100
-        self.c_space, self.theta_discretized = self.get_c_space()
+        self.calculate_c_space()
         self.map = self.c_space
         self.c_space_dim = len(self.c_space.shape)
         self.c_space_limit = [self.c_space.shape[i] for i in range(self.c_space_dim)]
@@ -36,6 +36,11 @@ class ArmEnvironment:
         self.goal_joint_state = np.array([np.argmin(np.abs(self.theta_discretized[i] - self.goal_joint_pose[i])) for i in range(len(self.goal_joint_pose))]).reshape((self.c_space_dim, 1))
         self.start = self.start_joint_state
         self.goal = self.goal_joint_state
+
+        self.change_env = False
+        self.change_env_step_threshold = 50
+        self.change_env_std_dev = 0.1
+
         print("start_joint_angles", self.start_joint_pose)
         print('start_joint_state', self.start_joint_state.flatten())
         print("goal_joint_angles", self.goal_joint_pose)
@@ -59,7 +64,6 @@ class ArmEnvironment:
 
             @param config: a [2 x n] numpy array of states
         """
-        # TODO: YOUR IMPLEMENTATION HERE
         config = config.reshape((self.c_space_dim, -1))
         # print(config, self.c_space_limit)
         for x in config.T:
@@ -155,8 +159,26 @@ class ArmEnvironment:
         
     def add_obstacles(self, obstacles):
         # Add obstacles to the environment
+        self.obstacle_ids = []
         for obstacle_pos, obstacle_size in obstacles:
-            self.add_obstacle(obstacle_pos, obstacle_size)
+            self.obstacle_ids.append(self.add_obstacle(obstacle_pos, obstacle_size))
+
+    def randomize_obstables(self):
+        # Add obstacles to the environment
+        valid = False
+
+        while not valid:
+            for obstacle_id in self.obstacle_ids:
+                obPos, obOrn = p.getBasePositionAndOrientation(obstacle_id)
+                newPos = np.random.normal(obPos, self.change_env_std_dev)
+                p.resetBasePositionAndOrientation(obstacle_id, newPos, obOrn)
+            
+            goal_state_valid = not self.is_in_collision(self.goal_joint_state)
+            start_state_valid = not self.is_in_collision(self.start_joint_state)
+            valid = goal_state_valid and start_state_valid
+
+        # self.start_joint_state
+        # self.goal_joint_state
 
     def add_obstacle(self, cube_position, cube_size):
         # Add a single obstacle to the environment
@@ -178,6 +200,8 @@ class ArmEnvironment:
             basePosition=cube_position,
             baseOrientation=cube_orientation,
         )
+
+        return obstacle_id
 
     def add_goal(self, goal_position):
         # Add the goal to the environment
@@ -204,17 +228,17 @@ class ArmEnvironment:
         return joint_angles
 
 
-    def is_in_collision(self, joint_indices, joint_angles, obstacles):
+    def is_in_collision(self, joint_state):
         # Check if the robot is in collision with the obstacles
         # Set the robot's joint angles
-        for joint_index, joint_angle in zip(joint_indices, joint_angles):
-            p.setJointMotorControl2(self.ROBOT_ID, joint_index, p.POSITION_CONTROL, targetPosition=joint_angle)
+        joint_angles = [self.theta_discretized[i][joint_state[i,0]] for i in range(joint_state.shape[0])]
+        self.set_robot_joint(self.joint_indices, joint_angles)
 
         # Step the simulation for one step to update the robot's pose
         p.stepSimulation()
 
         # Check for collisions between the robot and each obstacle
-        for obstacle_id in obstacles:
+        for obstacle_id in self.obstacle_ids:
             contact_points = p.getContactPoints(bodyA=self.ROBOT_ID, bodyB=obstacle_id)
             if contact_points:
                 return True  # Collision detected
@@ -223,7 +247,7 @@ class ArmEnvironment:
 
     def dist_to_goal(self, endpoint_position):
         # Calculate the distance between the endpoint and the goal
-        distance = self.compute_distance(endpoint_position, self.goal)
+        distance = self.compute_distance(endpoint_position, self.goal_joint_state)
         # distance = np.sqrt((goal_position[0] - endpoint_position[0]) ** 2 + (goal_position[2] - endpoint_position[2]) ** 2)
         return distance
     
@@ -250,7 +274,7 @@ class ArmEnvironment:
             print("Joint lower limit: ", jointInfo[8])
             print("Joint upper limit: ", jointInfo[9])
 
-    def get_c_space(self):
+    def calculate_c_space(self):
         # Get the configuration space for the robot
         # Define the range of joint angles for each joint
         num_joints = len(self.joint_info)
@@ -270,7 +294,8 @@ class ArmEnvironment:
             if len(contact_points) > 0:
                 c_space[indices] = 1
 
-        return c_space, theta_discretized
+        self.c_space = c_space
+        self.theta_discretized = theta_discretized
 
     def visualize_c_space(self):
         # Visualize the configuration space
@@ -285,23 +310,28 @@ class ArmEnvironment:
         fig.savefig("c_space.png")
 
     def follow_path(self, path):
-        max_velocity = 0.5
-        k_p = 5
-        k_d = 0.1
         time_step = 0.01
         max_steps = 10000
         tolerance = 1e-3
+        count = 0
         # Make the robot follow the given path
         joint_indices = [i[0] for i in self.joint_info]
 
         # Set the robot state to start state
-        start_joint_angles = [self.theta_discretized[i][0] for i in range(len(self.joint_info))]
+        start_joint_angles = [self.theta_discretized[i][self.start_joint_state[i]] for i in range(len(self.joint_info))]
         self.set_robot_joint(joint_indices, start_joint_angles)
         cost = [self.compute_distance(path[i], path[i+1]) for i in range(len(path)-1)]
         print(f"cost: {sum(cost)}")
         # print(path)
         for indices in path:
             target_joint_angles = [self.theta_discretized[i][indices[i]] for i in range(len(self.joint_info))]
+
+            # The plan changes for Dynamic path planning
+            if self.change_env:
+                if count > self.change_env_step_threshold:
+                    self.start_joint_state = np.array(indices).reshape(-1,1)
+                    return False
+
             for i in range(max_steps):
                 # Get the current joint angles
                 current_joint_angles = [p.getJointState(self.ROBOT_ID, j)[0] for j in joint_indices]
@@ -329,29 +359,9 @@ class ArmEnvironment:
                 # Step the simulation
                 p.stepSimulation()
                 time.sleep(time_step)
-
-        # for indices in path:
-        #     joint_angles = [self.theta_discretized[i][indices[i]] for i in range(len(self.joint_info))]
-        #     for k in range(len(joint_angles)):
-                # p.resetJointState(self.ROBOT_ID, joint_indices[k], joint_angles[k])
-                # time.sleep(0.5)
-
-    def follow_path_mod(self, path):
-        # Make the robot follow the given path
-
-        theta_diff_threshold = 0.1
-
-        joint_indices = [i[0] for i in self.joint_info]
-
-        # Set the robot state to start state
-        start_joint_angles = [self.theta_discretized[i][0] for i in range(len(self.joint_info))]
-        self.set_robot_joint(joint_indices, start_joint_angles)
-
-        for indices in path:
-            joint_angles = [self.theta_discretized[i][indices[i]] for i in range(len(self.joint_info))]
-            for k in range(len(joint_angles)):
-                p.resetJointState(self.ROBOT_ID, joint_indices[k], joint_angles[k])
-                time.sleep(0.1)
+            count += 1
+        
+        return True
 
     def set_robot_joint(self, joint_indices, joint_angles):
         # Set the robot's joint angles
