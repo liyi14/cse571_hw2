@@ -73,7 +73,7 @@ if __name__ == "__main__":
     if args.planner.lower() == 'nonholrrt':
         from RRTPlannerNonholonomic import RRTPlannerNonholonomic
         # Instantiate the RRT algorithm
-        planner = RRTPlannerNonholonomic(env)
+        planner = RRTPlannerNonholonomic(env, bias=args.bias)
     if args.planner.lower() == 'dynamic':
         from DynamicPathPlanner import DynamicPathPlanner
         # Instantiate the D*/LPA* algorithm
